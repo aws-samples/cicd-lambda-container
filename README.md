@@ -21,7 +21,7 @@ We recommend using [AWS Cloud9](https://aws.amazon.com/cloud9/) to create an env
 
 Run the following command in **Tooling** account from your terminal to create a new CodeCommit repository.
 
-    aws codecommit create-repository --repository-name lambda-container-repo
+    aws codecommit create-repository --repository-name lambda-container-repo --profile tooling
 
 Initialize Git Repository and push the code.
 
@@ -109,7 +109,7 @@ Delete cross-account roles from the test and prod.
   
 Delete the ECR repository.
 
-    aws ecr delete-repository --repository-name image-repository --force
+    aws ecr delete-repository --repository-name image-repository --profile tooling --force 
 
 Delete resources from the **tooling** account.
 
