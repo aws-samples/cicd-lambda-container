@@ -1,0 +1,19 @@
+{
+    "Parameters" : {
+        "GitProviderType"  : "CodeCommit",
+        "CodeCommitRepositoryName"  : "lambda-container-repo",
+        "MainGitBranch"  : "main",
+        "SamTemplate"  : "template.yaml",
+        "DeploymentRegion" : "<Region>",
+        "ToolingCodePipelineExecutionRoleArn" : "<ToolingPipelineExecutionRole ARN>",
+        "ToolingCloudFormationExecutionRoleArn" : "<ToolingCloudFormationExecutionRole ARN>",
+        "TestStackName" : "lambda-container-app-test",
+        "TestCodePipelineCrossAccountRoleArn" : "<CodePipelineCrossAccountRole ARN for Test>",
+        "TestCloudFormationCrossAccountRoleArn" : "<CloudFormationCrossAccountRole ARN for Test>",
+        "ArtifactsBucket" : "Artifacts Bucket Name",
+        "ImageRepositoryURI" : "ECR Image Repository URI",
+        "ProdStackName" : "lambda-container-app-prod",
+        "ProdCodePipelineCrossAccountRoleArn" : "<CodePipelineCrossAccountRole ARN for Test>",
+        "ProdCloudFormationCrossAccountRoleArn" : "<CloudFormationCrossAccountRole ARN for Prod>"
+    }
+}

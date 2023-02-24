@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: The AWS CloudFormation template that creates the CodePipeline 
+  resources in the tooling account
+
+Parameters:
+  CodePipelineUserName:
+    Type: String
+    Default: "CodePipelineUser"
+  CodePipelineExecutionRoleName:
+    Type: String
+    Default: "CodePipelineExecutionRole"
+  CloudFormationExecutionRoleName:
+    Type: String
+    Default: "CloudFormationExecutionRole"
+  ImageRepositoryName:
+    Type: String
+    Default: "image-repository"
+  TestAccountID: 
+    Description: Account ID of the Test AWS Account .
+    Type: String
+    ConstraintDescription: Must be a valid AWS Account ID without hyphens.
+    AllowedPattern: '\d{12}'
+    MinLength: 12
+    MaxLength: 12
+  ProdAccountID: 
+    Description: Account ID of the Prod AWS Account .
+    Type: String
+    ConstraintDescription: Must be a valid AWS Account ID without hyphens.
+    AllowedPattern: '\d{12}'
+    MinLength: 12
+    MaxLength: 12
+Resources:
+  PipelineUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref CodePipelineUserName
+      Policies:
+        - PolicyName: AssumeRoles
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "sts:AssumeRole"
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Role: pipeline-execution-role
+
+  PipelineUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      Serial: 1
+      Status: Active
+      UserName: !Ref PipelineUser
+
+  PipelineUserSecretKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      SecretString: !Sub '{"aws_access_key_id": "${PipelineUserAccessKey}", "aws_secret_access_key": "${PipelineUserAccessKey.SecretAccessKey}"}'
+
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref CloudFormationExecutionRoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: GrantCloudFormationFullAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: '*'
+                Resource: '*'
+
+  PipelineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref CodePipelineExecutionRoleName
+      Tags:
+        - Key: Role
+          Value: pipeline-execution-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt PipelineUser.Arn
+            Action:
+              - 'sts:AssumeRole'
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Select [4, !Split [':', !GetAtt PipelineUser.Arn]]
+            Action:
+              - 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                aws:PrincipalTag/Role: pipeline-codebuild-service-role
+                
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: "Retain"
+    Properties:
+      LoggingConfiguration:
+        DestinationBucketName:
+          !Ref ArtifactsLoggingBucket
+        LogFilePrefix: "artifacts-logs"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactsBucket
+      PolicyDocument:
+        Statement:
+          - Effect: "Deny"
+            Action: "s3:*"
+            Principal: "*"
+            Resource:
+              - !Join [ '',[ !GetAtt ArtifactsBucket.Arn, '/*' ] ]
+              - !GetAtt ArtifactsBucket.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Effect: "Allow"
+            Action:
+              - 's3:GetObject*'
+              - 's3:PutObject*'
+              - 's3:GetBucket*'
+              - 's3:List*'
+            Resource:
+              - !Join ['',[!GetAtt ArtifactsBucket.Arn, '/*']]
+              - !GetAtt ArtifactsBucket.Arn
+            Principal:
+              AWS:
+                - !GetAtt PipelineExecutionRole.Arn
+                - !GetAtt CloudFormationExecutionRole.Arn
+          - Effect: "Allow"
+            Action:
+              - 's3:GetObject*'
+              - 's3:PutObject*'
+              - 's3:GetBucket*'
+              - 's3:List*'
+            Resource:
+              - !Join ['',[!GetAtt ArtifactsBucket.Arn, '/*']]
+              - !GetAtt ArtifactsBucket.Arn
+            Principal:
+              AWS:
+                - !Sub arn:${AWS::Partition}:iam::${TestAccountID}:root
+                - !Sub arn:${AWS::Partition}:iam::${ProdAccountID}:root
+  ArtifactsLoggingBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: "Retain"
+    Properties:
+      AccessControl: "LogDeliveryWrite"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ArtifactsLoggingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactsLoggingBucket
+      PolicyDocument:
+        Statement:
+          - Effect: "Deny"
+            Action: "s3:*"
+            Principal: "*"
+            Resource:
+              - !Join [ '',[ !GetAtt ArtifactsLoggingBucket.Arn, '/*' ] ]
+              - !GetAtt ArtifactsLoggingBucket.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  PipelineExecutionRolePermissionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: PipelineExecutionRolePermissions
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: 'iam:PassRole'
+            Resource:
+              !GetAtt CloudFormationExecutionRole.Arn
+          - Effect: Allow
+            Action:
+              - "cloudformation:CreateChangeSet"
+              - "cloudformation:DescribeChangeSet"
+              - "cloudformation:ExecuteChangeSet"
+              - "cloudformation:DeleteStack"
+              - "cloudformation:DescribeStackEvents"
+              - "cloudformation:DescribeStacks"
+              - "cloudformation:GetTemplate"
+              - "cloudformation:GetTemplateSummary"
+              - "cloudformation:DescribeStackResource"
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - 's3:DeleteObject'
+              - 's3:GetObject*'
+              - 's3:PutObject*'
+              - 's3:GetBucket*'
+              - 's3:List*'
+            Resource:
+              - !Join [ '',[ !GetAtt ArtifactsBucket.Arn, '/*' ] ]
+              - !GetAtt ArtifactsBucket.Arn
+          - Effect: "Allow"
+            Action: "ecr:GetAuthorizationToken"
+            Resource: "*"
+          - Effect: "Allow"
+            Action:
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchDeleteImage"
+              - "ecr:BatchGetImage"
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:PutImage"
+              - "ecr:InitiateLayerUpload"
+              - "ecr:UploadLayerPart"
+              - "ecr:CompleteLayerUpload"
+            Resource:
+                - !GetAtt ImageRepository.Arn
+      Roles:
+        - !Ref PipelineExecutionRole
+
+  ImageRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ImageRepositoryName
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CrossAccountPermission
+            Effect: Allow
+            Principal:
+              AWS: 
+                - !Sub arn:${AWS::Partition}:iam::${TestAccountID}:root
+                - !Sub arn:${AWS::Partition}:iam::${ProdAccountID}:root
+            Action:
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+          - Sid: LambdaECRImageRetrievalPolicy
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+            Condition:
+              ForAnyValue:StringLike:
+                aws:sourceArn:
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${TestAccountID}:function:*
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${ProdAccountID}:function:*              
+          - Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt PipelineExecutionRole.Arn
+                - !GetAtt CloudFormationExecutionRole.Arn
+            Action:
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:PutImage"
+              - "ecr:InitiateLayerUpload"
+              - "ecr:UploadLayerPart"
+              - "ecr:CompleteLayerUpload"
+
+Outputs:
+  PipelineUser:
+    Description: ARN of the Pipeline IAM User
+    Value:
+      !GetAtt PipelineUser.Arn
+
+  PipelineUserSecretKey:
+    Description: AWS Access Key and Secret Key of pipeline user.
+    Value: !Ref PipelineUserSecretKey
+
+  CloudFormationExecutionRole:
+    Description: ARN of the IAM Role(CloudFormationExecutionRole)
+    Value:
+      !GetAtt CloudFormationExecutionRole.Arn
+      
+  PipelineExecutionRole:
+    Description: ARN of the IAM Role(PipelineExecutionRole)
+    Value:
+      !GetAtt PipelineExecutionRole.Arn
+     
+  ArtifactsBucket:
+    Description: Artifacts bucket Name
+    Value:
+      !Ref ArtifactsBucket
+
+  ArtifactsBucketArn:
+    Description: ARN of the Artifacts bucket
+    Value:
+      !GetAtt ArtifactsBucket.Arn
+
+  ImageRepositoryArn:
+    Description: ARN of the ECR image repository
+    Value:
+      !GetAtt ImageRepository.Arn
+
+  ImageRepositoryURI:
+    Description: URI of the ECR image repository
+    Value:
+      !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepositoryName}
