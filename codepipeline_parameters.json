@@ -13,7 +13,7 @@
         "ArtifactsBucket" : "Artifacts Bucket Name",
         "ImageRepositoryURI" : "ECR Image Repository URI",
         "ProdStackName" : "lambda-container-app-prod",
-        "ProdCodePipelineCrossAccountRoleArn" : "<CodePipelineCrossAccountRole ARN for Test>",
+        "ProdCodePipelineCrossAccountRoleArn" : "<CodePipelineCrossAccountRole ARN for Prod>",
         "ProdCloudFormationCrossAccountRoleArn" : "<CloudFormationCrossAccountRole ARN for Prod>"
     }
 }
